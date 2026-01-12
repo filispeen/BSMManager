@@ -1,0 +1,44 @@
+{
+  "name": "bsmdownloader",
+  "version": "1.0.0",
+  "description": "Downloads maps directly into beat saber",
+  "keywords": [
+    "BS",
+    "beat",
+    "saber"
+  ],
+  "license": "ISC",
+  "author": "FILISPEEN",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx electron .",
+    "build": "electron-builder",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "extract-zip": "^2.0.1",
+    "fs": "^0.0.1-security",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.filispeen.bsmdownloader",
+    "productName": "BSMDownloader",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable",
+        "zip"
+      ]
+    }
+  }
+}
