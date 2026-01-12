@@ -1,5 +1,5 @@
 {
-  "name": "bsmdownloader",
+  "name": "bsmmanager",
   "version": "1.3.2",
   "description": "Downloads maps directly into beat saber",
   "keywords": [
@@ -27,8 +27,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.filispeen.bsmdownloader",
-    "productName": "BSMDownloader",
+    "appId": "com.filispeen.bsmmanager",
+    "productName": "BSMManager",
     "directories": {
       "output": "dist"
     },

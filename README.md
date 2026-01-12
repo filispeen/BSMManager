@@ -1,4 +1,4 @@
-# BSMDownloader
+# BSMManager
 
 Electron wrapper for BeatSaver that downloads maps and playlists directly into
 your Beat Saber CustomLevels folder.
