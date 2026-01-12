@@ -25,6 +25,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Read package version
+        id: package-version
+        run: |
+          $version = node -p "require('./package.json').version"
+          Add-Content $env:GITHUB_OUTPUT "version=$version"
+
       - name: Build
         run: npm run build
         env:
@@ -33,12 +39,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.sha }}
-          name: Build ${{ github.sha }}
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: v${{ steps.package-version.outputs.version }}
           files: |
             dist/*.exe
             dist/*.zip
-            dist/*.yml
             dist/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
