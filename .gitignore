@@ -137,3 +137,5 @@ dist
 
 *.bplist
 *.css
+
+!assets/**/*.css

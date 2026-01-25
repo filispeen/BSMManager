@@ -144,11 +144,47 @@
     close.textContent = "Close";
     close.className = "btn btn-secondary";
 
+    const sortSelect = document.createElement("select");
+    sortSelect.className = "form-control";
+    sortSelect.style.width = "auto";
+    sortSelect.style.marginLeft = "8px";
+
+    const sortOptionAZ = document.createElement("option");
+    sortOptionAZ.value = "az";
+    sortOptionAZ.textContent = "A-Z";
+    sortOptionAZ.selected = true;
+
+    const sortOptionDuration = document.createElement("option");
+    sortOptionDuration.value = "duration";
+    sortOptionDuration.textContent = "Duration";
+
+    const sortOptionDate = document.createElement("option");
+    sortOptionDate.value = "date";
+    sortOptionDate.textContent = "Install date";
+
+    sortSelect.appendChild(sortOptionAZ);
+    sortSelect.appendChild(sortOptionDuration);
+    sortSelect.appendChild(sortOptionDate);
+
+    const invertButton = document.createElement("button");
+    invertButton.className = "btn btn-primary";
+    invertButton.style.marginLeft = "8px";
+    invertButton.dataset.inverted = "false";
+    invertButton.id = "__bsmInvertButton";
+
+    const invertSymbol = document.createElement("i");
+    invertSymbol.className = "fas fa-sort-amount-down";
+    invertSymbol.setAttribute("aria-hidden", "true");
+
+    invertButton.appendChild(invertSymbol);
+
     header.appendChild(title);
     header.appendChild(count);
     header.appendChild(spacer);
     actions.appendChild(refresh);
     actions.appendChild(close);
+    actions.appendChild(sortSelect);
+    actions.appendChild(invertButton);
     header.appendChild(actions);
 
     const list = document.createElement("div");
@@ -165,6 +201,10 @@
       panel.style.display = visible ? "block" : "none";
     };
     setVisible(false);
+
+    // Shared audio instance for all cards
+    let currentAudio = null;
+    let currentAudioElement = null;
 
     const difficultyOrderMap = new Map([
       ["Easy", 0],
@@ -236,7 +276,82 @@
       const audio = document.createElement("div");
       audio.className = "audio-progress";
       audio.innerHTML =
-        '<i class="fas fa-play"></i><div class="pie"><div class="left-size half-circle"></div><div class="right-size half-circle"></div></div>';
+        '<i class="fas fa-play"></i><div class="pie"><div class="left-size half-circle" style="transform: rotate(0deg);"></div><div class="right-size half-circle" style="display: none;"></div></div>';
+
+      const updateProgress = () => {
+        if (!currentAudio || currentAudio.paused) return;
+
+        const progress =
+          (currentAudio.currentTime / currentAudio.duration) * 100;
+        const rotation = (progress / 100) * 360;
+
+        const pie = audio.querySelector(".pie");
+        const leftHalf = audio.querySelector(".left-size");
+        const rightHalf = audio.querySelector(".right-size");
+
+        if (rotation <= 180) {
+          pie.style = "";
+          leftHalf.style.transform = "rotate(0deg)";
+          rightHalf.style.transform = `rotate(${rotation}deg)`;
+        } else {
+          pie.style = "clip-path: rect(0px 50px 100% 0%)";
+          leftHalf.style.transform = `rotate(${rotation}deg)`;
+          rightHalf.style.transform = "rotate(180deg)";
+        }
+
+        requestAnimationFrame(updateProgress);
+      };
+
+      const resetProgress = () => {
+        const pie = audio.querySelector(".pie");
+        const leftHalf = audio.querySelector(".left-size");
+        const rightHalf = audio.querySelector(".right-size");
+
+        pie.style.clipPath = "rect(0px, 50px, 100%, 25px)";
+        leftHalf.style.transform = "rotate(0deg)";
+        rightHalf.style.transform = "rotate(0deg)";
+      };
+
+      audio.onclick = (event) => {
+        // Stop previous audio if playing
+        if (currentAudio && currentAudioElement !== audio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudioElement.classList.remove("playing");
+          const prevPie = currentAudioElement.querySelector(".pie");
+          const prevLeft = currentAudioElement.querySelector(".left-size");
+          const prevRight = currentAudioElement.querySelector(".right-size");
+          prevPie.style.clipPath = "rect(0px, 50px, 100%, 25px)";
+          prevLeft.style.transform = "rotate(0deg)";
+          prevRight.style.transform = "rotate(0deg)";
+        }
+
+        audio.classList.toggle("playing");
+
+        if (!currentAudio || currentAudioElement !== audio) {
+          currentAudio = new Audio(
+            `https://eu.cdn.beatsaver.com/${map.hash}.mp3`,
+          );
+          currentAudio.volume = 0.4;
+          currentAudioElement = audio;
+
+          currentAudio.addEventListener("ended", () => {
+            audio.classList.remove("playing");
+            currentAudio.currentTime = 0;
+            resetProgress();
+          });
+        }
+
+        if (!audio.classList.contains("playing")) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          resetProgress();
+        } else {
+          currentAudio.play();
+          updateProgress();
+        }
+      };
+
       coverBlock.appendChild(audio);
 
       const cover = document.createElement("img");
@@ -253,7 +368,7 @@
           if (window.bsm && typeof window.bsm.getCoverImage === "function") {
             try {
               const dataUrl = await window.bsm.getCoverImage(
-                map.coverImagePath
+                map.coverImagePath,
               );
               if (dataUrl) {
                 cover.src = dataUrl;
@@ -274,7 +389,7 @@
                 }
               }
             },
-            { rootMargin: "100px" }
+            { rootMargin: "100px" },
           );
           observer.observe(cover);
         } else {
@@ -285,7 +400,7 @@
       }
       coverBlock.appendChild(cover);
 
-      const ratingWrap = document.createElement("div");
+      /*const ratingWrap = document.createElement("div");
 
       const vote = document.createElement("small");
       vote.className = "text-center vote";
@@ -313,7 +428,7 @@
 
       ratingWrap.appendChild(vote);
       ratingWrap.appendChild(percentage);
-      coverBlock.appendChild(ratingWrap);
+      coverBlock.appendChild(ratingWrap);*/
 
       const info = document.createElement("div");
       info.className = "info";
@@ -343,7 +458,7 @@
           authorLink.href = "#";
           authorLink.textContent = name;
           authorLink.addEventListener("click", (event) =>
-            event.preventDefault()
+            event.preventDefault(),
           );
           authorLine.appendChild(authorLink);
         }
@@ -371,14 +486,12 @@
       const additional = document.createElement("div");
       additional.className = "additional";
       if (map.folderName) {
-        additional.appendChild(
-          createAdditionalSpan(map.folderName, "fas fa-key")
-        );
+        additional.appendChild(createAdditionalSpan(map.key, "fas fa-key"));
       }
       if (map.beatsPerMinute) {
         const bpmSpan = document.createElement("span");
         bpmSpan.appendChild(
-          document.createTextNode(String(Math.round(map.beatsPerMinute)))
+          document.createTextNode(String(Math.round(map.beatsPerMinute))),
         );
         const bpmIcon = document.createElement("img");
         bpmIcon.alt = "Metronome";
@@ -407,6 +520,42 @@
 
       deleteLink.appendChild(deleteText);
       deleteLink.appendChild(deleteIcon);
+
+      const reDownloadLink = document.createElement("a");
+      reDownloadLink.href = "#";
+      reDownloadLink.title = "Sync";
+      reDownloadLink.setAttribute("aria-label", "Re-download");
+
+      const reDownloadText = document.createElement("span");
+      reDownloadText.className = "dd-text";
+      reDownloadText.textContent = "Sync";
+
+      const reDownloadIcon = document.createElement("i");
+      reDownloadIcon.className = "fas fa-cloud-download-alt text-info";
+      reDownloadIcon.setAttribute("aria-hidden", "true");
+      reDownloadLink.appendChild(reDownloadText);
+      reDownloadLink.appendChild(reDownloadIcon);
+
+      reDownloadLink.addEventListener("click", async (event) => {
+        event.preventDefault();
+        if (
+          !window.bsm ||
+          typeof window.bsm.deleteInstalledMap !== "function"
+        ) {
+          return;
+        }
+
+        reDownloadLink.style.pointerEvents = "none";
+        const result = await window.bsm.reDownloadInstalledMap(map.folderName);
+        if (result && result.ok) {
+          beatmap.remove();
+          refresh.click();
+          reDownloadLink.style.pointerEvents = "";
+        } else {
+          console.warn("Sync failed:", result && result.error);
+          reDownloadLink.style.pointerEvents = "";
+        }
+      });
 
       deleteLink.addEventListener("click", async (event) => {
         event.preventDefault();
@@ -437,6 +586,7 @@
       });
 
       links.appendChild(deleteLink);
+      links.appendChild(reDownloadLink);
 
       content.appendChild(coverBlock);
       content.appendChild(info);
@@ -469,8 +619,48 @@
       }
       count.textContent = String(maps.length);
 
+      const sortSelectElement = document.querySelector("select.form-control");
+      const sortValue = sortSelectElement ? sortSelectElement.value : "az";
+      const invertButtonElement = document.getElementById("__bsmInvertButton");
+      const isInverted = invertButtonElement
+        ? invertButtonElement.dataset.inverted === "true"
+        : false;
+
+      const sortMaps = (maps, sortValue, isInverted) => {
+        switch (sortValue) {
+          case "az":
+            maps.sort((a, b) => {
+              const nameA = a.songName || "";
+              const nameB = b.songName || "";
+              return isInverted
+                ? nameB.localeCompare(nameA)
+                : nameA.localeCompare(nameB);
+            });
+            break;
+          case "duration":
+            maps.sort((a, b) => {
+              const durationA = a.songDuration || 0;
+              const durationB = b.songDuration || 0;
+              return isInverted ? durationA - durationB : durationB - durationA;
+            });
+            break;
+          case "date":
+            maps.sort((a, b) => {
+              const dateA = a.installedAt || 0;
+              const dateB = b.installedAt || 0;
+              return isInverted ? dateA - dateB : dateB - dateA;
+            });
+            break;
+          default:
+            break;
+        }
+      };
+
+      sortMaps(maps, sortValue, isInverted);
+
       list.textContent = "";
       for (const map of maps) {
+        console.log("Rendering installed map:", map);
         list.appendChild(createBeatmapCard(map));
       }
     };
@@ -493,6 +683,44 @@
     close.addEventListener("click", () => {
       setVisible(false);
     });
+
+    const elems = [".nav-item", ".nav-link", ".navbar-brand"];
+    elems.forEach((selector) => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach((element) => {
+        console.log("Adding click listener to:", element);
+        if (
+          element.id === "__bsmInstalledLink" ||
+          element.textContent === "Installed"
+        ) {
+          return;
+        }
+        element.addEventListener("click", () => {
+          close.click();
+        });
+      });
+    });
+
+    const sortSelectElement = document.querySelector("select.form-control");
+    if (sortSelectElement) {
+      sortSelectElement.addEventListener("change", () => {
+        renderList();
+      });
+    }
+
+    const invertButtonElement = document.getElementById("__bsmInvertButton");
+    if (invertButtonElement) {
+      invertButtonElement.addEventListener("click", () => {
+        const isInverted = invertButtonElement.dataset.inverted === "true";
+        invertButtonElement.dataset.inverted = isInverted ? "false" : "true";
+        if (isInverted) {
+          invertSymbol.className = "fas fa-sort-amount-down";
+        } else {
+          invertSymbol.className = "fas fa-sort-amount-up";
+        }
+        renderList();
+      });
+    }
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {

@@ -50,7 +50,7 @@ const INSTALLED_MAPS_STYLE = loadStyle("installed-maps.css");
 const INSTALLED_MAPS_SCRIPT_TEMPLATE = loadScript("installed-maps.js");
 const INSTALLED_MAPS_SCRIPT = INSTALLED_MAPS_SCRIPT_TEMPLATE.replace(
   "__INSTALLED_MAPS_STYLE__",
-  JSON.stringify(INSTALLED_MAPS_STYLE)
+  JSON.stringify(INSTALLED_MAPS_STYLE),
 );
 
 /**
@@ -346,10 +346,22 @@ async function listInstalledMaps(customLevelsPath) {
 
   const maps = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) {
+    if (!entry.isDirectory() || entry.name.includes("(Built in)")) {
       continue;
     }
+
     const folderName = entry.name;
+    const key = folderName.split(" ")[0];
+    const hash = await fs.promises
+      .readFile(path.join(customLevelsPath, folderName, "hash.txt"), "utf8")
+      .then((data) => data.trim().toLowerCase())
+      .catch(() => null);
+    const folderCreationDate = await fs.promises
+      .stat(path.join(customLevelsPath, folderName))
+      .then((stat) => stat.birthtimeMs);
+    console.log(
+      `Reading installed map: ${folderName.replace(`${key} `, "")}\nkey: ${key}\nhash: ${hash}`,
+    );
     const folderPath = path.join(customLevelsPath, folderName);
     const info = await readInfoDat(folderPath);
     const coverImagePath = info
@@ -357,6 +369,9 @@ async function listInstalledMaps(customLevelsPath) {
       : "";
     maps.push({
       folderName,
+      key,
+      hash,
+      installedAt: folderCreationDate,
       songName: info && info.songName ? info.songName : folderName,
       songAuthorName: info && info.songAuthorName ? info.songAuthorName : "",
       levelAuthorName: info && info.levelAuthorName ? info.levelAuthorName : "",
@@ -367,9 +382,33 @@ async function listInstalledMaps(customLevelsPath) {
   }
 
   maps.sort((a, b) =>
-    a.songName.localeCompare(b.songName, "en", { sensitivity: "base" })
+    a.songName.localeCompare(b.songName, "en", { sensitivity: "base" }),
   );
   return maps;
+}
+
+/**
+ * Re-download installed map
+ * @param {string} customLevelsPath
+ * @param {string} folderName
+ * @param {Promise<boolean>}
+ */
+async function reDownloadInstalledMap(customLevelsPath, folderName) {
+  const maps = await listInstalledMaps(customLevelsPath);
+  const targetMap = maps.find((m) => m.folderName === folderName);
+  if (!targetMap || !targetMap.hash) {
+    throw new Error("Map not found or missing hash.");
+  }
+  const result = await downloadSingleMap(
+    targetMap.hash,
+    { customLevelsPath },
+    {},
+    targetMap.key,
+  );
+  if (!result.success) {
+    throw result.error || new Error("Download failed.");
+  }
+  return true;
 }
 
 /**
@@ -416,6 +455,8 @@ async function parsePlaylistFile(filePath) {
   const songs = Array.isArray(data.songs) ? data.songs : [];
 
   const hashes = [];
+  const keys = [];
+
   for (const song of songs) {
     if (!song || typeof song.hash !== "string") {
       continue;
@@ -424,6 +465,10 @@ async function parsePlaylistFile(filePath) {
     if (HASH_REGEX.test(hash)) {
       hashes.push(hash);
     }
+
+    if (typeof song.key === "string" && song.key.trim()) {
+      keys.push(song.key.trim());
+    }
   }
 
   const title =
@@ -431,7 +476,7 @@ async function parsePlaylistFile(filePath) {
       ? data.playlistTitle.trim()
       : path.basename(filePath, path.extname(filePath));
 
-  return { title, hashes: [...new Set(hashes)] };
+  return { title, hashes: [...new Set(hashes)], keys: [...new Set(keys)] };
 }
 
 /**
@@ -557,10 +602,13 @@ function setWindowProgress(win, value, indeterminate) {
  * @param {object} progressState
  * @returns {Promise<{ success: boolean, hash: string, error?: Error }>}
  */
-async function downloadSingleMap(hash, state, progressState) {
+async function downloadSingleMap(hash, state, progressState, key) {
   const zipName = `${hash}.zip`;
   const savePath = path.join(state.customLevelsPath, zipName);
   const extractPath = path.join(state.customLevelsPath, hash);
+  console.log(
+    `Downloading map ${hash}...\nsavePath: ${savePath}\nextractPath: ${extractPath}`,
+  );
 
   try {
     await fs.promises.mkdir(extractPath, { recursive: true });
@@ -575,6 +623,26 @@ async function downloadSingleMap(hash, state, progressState) {
 
     await extractZip(savePath, { dir: extractPath });
     await fs.promises.unlink(savePath);
+    await fs.promises.writeFile(
+      path.join(extractPath, "hash.txt"),
+      hash,
+      "utf8",
+    );
+    const info = await readInfoDat(extractPath);
+    const songName = `${info && info.songName ? info.songName : hash}`;
+    const levelAuthorName = `${info && info.levelAuthorName ? info.levelAuthorName : "Unknown"}`;
+    const safeSongName =
+      songName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim() || "UnknownSong";
+    const safeAuthorName =
+      levelAuthorName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim() ||
+      "UnknownAuthor";
+    const finalFolderName = key
+      ? `${key} (${safeSongName} - ${safeAuthorName})`
+      : `${safeSongName} - ${safeAuthorName}`;
+    const output = path.join(state.customLevelsPath, finalFolderName);
+
+    console.log(`Renaming extracted folder to: ${output}`);
+    await fs.promises.rename(extractPath, output);
 
     return { success: true, hash };
   } catch (err) {
@@ -602,6 +670,7 @@ async function downloadSingleMap(hash, state, progressState) {
 async function downloadPlaylist(playlistPath, state, win, options = {}) {
   const { clearProgress = true } = options;
   const playlist = await parsePlaylistFile(playlistPath);
+  const keys = playlist.keys;
   const hashes = playlist.hashes;
   if (hashes.length === 0) {
     return { title: playlist.title, total: 0, completed: 0 };
@@ -645,15 +714,16 @@ async function downloadPlaylist(playlistPath, state, win, options = {}) {
   }, 100);
 
   const results = await Promise.all(
-    hashes.map((hash) =>
+    hashes.map((hash, index) =>
       limit(async () => {
-        const result = await downloadSingleMap(hash, state, progressState);
+        const key = keys[index]; // Отримуємо відповідний ключ
+        const result = await downloadSingleMap(hash, state, progressState, key);
         progressState.completed += 1;
         progressState.bytesReceived.delete(hash);
         progressState.bytesTotal.delete(hash);
         return result;
-      })
-    )
+      }),
+    ),
   );
 
   clearInterval(progressInterval);
@@ -661,12 +731,12 @@ async function downloadPlaylist(playlistPath, state, win, options = {}) {
   const succeeded = results.filter((r) => r.success).length;
   const failed = results
     .filter((r) => !r.success)
-    .map((r) => ({ hash: r.hash, error: r.error }));
+    .map((r) => ({ hash: r.hash, key: r.key, error: r.error }));
 
   if (failed.length > 0) {
     console.warn(
       `Playlist download: ${failed.length} failed:`,
-      failed.map((f) => f.hash)
+      failed.map((f) => `${f.key || "unknown"} (${f.hash})`),
     );
   }
 
@@ -682,7 +752,6 @@ async function downloadPlaylist(playlistPath, state, win, options = {}) {
     failed,
   };
 }
-
 /**
  * Setup download handlers
  * @param {Electron.Session} session
@@ -752,6 +821,7 @@ function setupDownloads(session, state, win) {
           return;
         }
 
+        console.log(`Extracting downloaded zip: ${savePath}`);
         const baseName = path.basename(filename, ext);
         const extractPath = path.join(customLevelsPath, baseName);
         await fs.promises.mkdir(extractPath, { recursive: true });
@@ -759,6 +829,12 @@ function setupDownloads(session, state, win) {
         try {
           await extractZip(savePath, { dir: extractPath });
           await fs.promises.unlink(savePath);
+
+          const downloadUrl = item.getURL();
+          const urlHash = path.basename(downloadUrl, ".zip"); // отримуємо "4a75caa66f7913f27d3da8db61afb6a9f8d1b7ff"
+          const hashFilePath = path.join(extractPath, "hash.txt");
+          await fs.promises.writeFile(hashFilePath, urlHash, "utf8");
+          console.log(`Saved hash to: ${hashFilePath}`);
         } catch (err) {
           console.error("Failed to extract zip:", err);
         }
@@ -844,6 +920,18 @@ function buildMenu(Menu, app, dialog, state, win) {
       label: "File",
       submenu: [
         { label: "Set Beat Saber Folder...", click: setBeatSaberFolder },
+        {
+          label: "Open Beat Saber Folder",
+          click: async () => {
+            const root = state.customLevelsPath
+              ? path.dirname(path.dirname(state.customLevelsPath))
+              : null;
+            if (root) {
+              const { shell } = require("electron");
+              shell.openPath(root);
+            }
+          },
+        },
         { type: "separator" },
         { role: "quit" },
       ],
@@ -863,8 +951,20 @@ function buildMenu(Menu, app, dialog, state, win) {
       ],
     },
     {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "close" }],
+      label: "Github",
+      click: () => {
+        const { shell } = require("electron");
+        shell.openExternal("https://github.com/filispeen/BSMManager");
+      },
+    },
+    {
+      label: "Patreon",
+      click: () => {
+        const { shell } = require("electron");
+        shell.openExternal(
+          "https://patreon.com/FILISPEEN?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink",
+        );
+      },
     },
   ];
 
@@ -909,6 +1009,21 @@ async function main() {
     }
     try {
       await deleteInstalledMap(state.customLevelsPath, folderName);
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle("bsm:reDownloadInstalledMap", async (event, folderName) => {
+    if (!state.customLevelsPath) {
+      return { ok: false, error: "CustomLevels not set." };
+    }
+    try {
+      await reDownloadInstalledMap(state.customLevelsPath, folderName);
       return { ok: true };
     } catch (err) {
       return {

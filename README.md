@@ -31,9 +31,3 @@ npm run build
 ```
 
 `npm run pack` creates a directory build without an installer.
-
-## Playlist Import
-
-Download a `.bplist` playlist file while the app is running. The downloader
-parses the file, downloads each map from BeatSaver CDN, extracts them into
-`CustomLevels`, then deletes the playlist file.
